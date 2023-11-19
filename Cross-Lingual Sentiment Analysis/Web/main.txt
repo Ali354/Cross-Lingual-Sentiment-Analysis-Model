@@ -1,0 +1,107 @@
+from cmath import polar
+from textblob import TextBlob
+import pandas as pd
+import streamlit as st
+import cleantext
+from langdetect import detect
+from tqdm.notebook import tqdm
+import nltk
+import numpy as np
+from wordfreq import word_frequency
+from gensim.models import KeyedVectors
+
+import pickle
+
+filename = 'Model/SVM_rbf_En_Ar_MModel.sav'
+
+# load the model from disk
+loaded_model = pickle.load(open(filename, 'rb'))
+
+
+en_embeddings = KeyedVectors.load_word2vec_format("wiki.multi.en.vec")
+
+from gensim.models import KeyedVectors
+import numpy as np
+
+ar_embeddings = KeyedVectors.load_word2vec_format("wiki.multi.ar.vec", limit=50000)
+
+# Pad the vectors with zeros to match the desired dimensionality (300 in this case)
+vector_size = 300
+new_vectors = np.zeros((len(ar_embeddings.key_to_index), vector_size))
+for word, idx in ar_embeddings.key_to_index.items():
+    if len(ar_embeddings.get_vector(word)) == vector_size:
+        new_vectors[idx] = ar_embeddings.get_vector(word)
+    else:
+        print(f"Skipping word '{word}' with vector size {len(ar_embeddings.get_vector(word))}")
+ar_embeddings.vectors = new_vectors
+ar_embeddings.vector_size = vector_size
+
+
+def compute_sentence_embeddings(questions, word_embeddings, language, a=0.001): 
+    
+    question_embeddings = []
+    for question in questions: 
+        tokens = [t.lower() for t in nltk.word_tokenize(question)]
+        tokens = [token for token in tokens if token in word_embeddings]
+
+        weights = [a/(a+word_frequency(token, language)) for token in tokens]
+        embedding = np.average([word_embeddings[token] for token in tokens], axis=0, weights=weights)
+        question_embeddings.append(embedding)
+        
+    return question_embeddings
+
+
+
+def Embedding_dueTo_Language_Detection(text):
+    language = detect(text)
+    if(language=='ar'):
+    #     do arabic embedding
+        print('arabic')
+    #    code for get sentiment for arabic
+        reviews = [text]
+        reviews_embeddings = compute_sentence_embeddings(reviews, ar_embeddings, "ar")
+        reviews_embeddings_ = reviews_embeddings
+        sentiment = loaded_model.predict(reviews_embeddings_)
+        return (sentiment) 
+    else:
+    #     do english embedding
+        print('english')
+    #    code for get sentiment for english
+        reviews = [text]
+        reviews_embeddings = compute_sentence_embeddings(reviews, en_embeddings, "en")
+        reviews_embeddings_ = reviews_embeddings
+        sentiment = loaded_model.predict(reviews_embeddings_)
+        return (sentiment) 
+
+
+st.header('Cross-Lingual Sentiment Analysis')
+with st.expander('Analyze Text'):
+    text = st.text_input('Text here: ')
+    if text:
+        polarity = Embedding_dueTo_Language_Detection(text)
+        st.write(polarity)
+
+with st.expander('Analyze CSV'):
+    upl = st.file_uploader('Upload file')
+
+    if upl:
+        df = pd.read_excel(upl)
+        df['analysis'] = df['tweets'].apply(Embedding_dueTo_Language_Detection)
+
+        st.write(df.head(15))
+
+        @st.cache
+        def convert_df(df):
+            # IMPORTANT: Cache the conversion to prevent computation on every rerun
+            return df.to_csv().encode('utf-8')
+        csv = convert_df(df)
+
+        st.download_button(
+            label="Download data as CSV",
+            data=csv,
+            file_name='sentiment.csv',
+            mime='text/csv',
+        )
+
+
+
